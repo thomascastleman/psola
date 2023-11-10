@@ -243,9 +243,14 @@ where
 #[cfg(test)]
 mod test {
     use super::*;
+    use dasp::{signal, Signal};
+    use pitch_detection::{
+        detector::{yin::YINDetector, PitchDetector},
+        Pitch,
+    };
 
     #[test]
-    fn same_source_and_target_frequency() {
+    fn small_buffer_same_source_and_target_frequency() {
         let audio = [
             0.0, -1.0, 0.0, 1.0, 0.0, -1.0, 0.0, 1.0, 0.0, -1.0, 0.0, 1.0,
         ];
@@ -268,5 +273,79 @@ mod test {
     }
 
     // TODO(tcastleman) Test that works with other sample types
-    // TODO(tcastleman) Use pitch detector to automatically assess if output is shifted correctly
+
+    // TODO(tcastleman) Should test across different sample rates / buffer sizes
+    const SAMPLE_RATE: usize = 44100;
+    const BUFFER_SIZE: usize = 1024;
+    const PADDING: usize = BUFFER_SIZE / 2;
+    const POWER_THRESHOLD: f64 = 5.0;
+    const CLARITY_THRESHOLD: f64 = 0.7;
+
+    // TODO(tcastleman) What should this actually be? Imperceptible difference in pitch? How out of tune does 1 Hz error sound?
+    const ALLOWED_ERROR: f64 = 1.0;
+
+    /// Detect the pitch of a given input signal.
+    fn detect_pitch(signal: &[f64]) -> Pitch<f64> {
+        YINDetector::new(BUFFER_SIZE, PADDING)
+            .get_pitch(signal, SAMPLE_RATE, POWER_THRESHOLD, CLARITY_THRESHOLD)
+            .unwrap()
+    }
+
+    /// Asserts that two values are within `ALLOWED_ERROR` of each other, printing both values
+    /// and their difference upon failure.
+    macro_rules! assert_roughly_eq {
+        ($expected:expr, $actual:expr) => {
+            let expected = $expected;
+            let actual = $actual;
+            let diff = (expected - actual).abs();
+            if (diff >= ALLOWED_ERROR) {
+                panic!(
+                    "Expected ({}) and actual ({}) differ by {} (more than acceptable {})",
+                    expected, actual, diff, ALLOWED_ERROR
+                );
+            }
+        };
+    }
+
+    fn assert_correctly_shifts_pure_sine_wave(input_frequency: f64, target_frequency: f64) {
+        // Construct a pure sine wave at the input frequency
+        let input: Vec<_> = signal::rate(SAMPLE_RATE as f64)
+            .const_hz(input_frequency)
+            .sine()
+            .take(BUFFER_SIZE)
+            .collect();
+
+        // Shift to the target frequency
+        let psola = Psola::new(&input, SAMPLE_RATE as f32, input_frequency as f32).unwrap();
+        let mut output = [0.0; BUFFER_SIZE];
+        psola.shift(target_frequency as f32, &mut output);
+
+        // Assert the detected pitch of the PSOLA output matches the target frequency
+        assert_roughly_eq!(target_frequency, detect_pitch(&output).frequency);
+    }
+
+    #[test]
+    /// Checks that our signal generation and pitch detection mechanisms function correctly.
+    fn pitch_detection_sanity_check() {
+        const FREQUENCY: f64 = 440.0;
+        let signal = signal::rate(SAMPLE_RATE as f64).const_hz(FREQUENCY).sine();
+        let buffer: Vec<f64> = signal.take(BUFFER_SIZE).collect();
+        let detected_pitch = detect_pitch(&buffer);
+        assert_roughly_eq!(FREQUENCY, detected_pitch.frequency);
+    }
+
+    /// Generates a test case which checks that PSOLA correctly shifts a pure sine wave of a
+    /// chosen frequency to a given target frequency.
+    macro_rules! test_pure_sine {
+        ($test_fn_name:ident, $input_frequency:expr, $target_frequency:expr) => {
+            #[test]
+            fn $test_fn_name() {
+                assert_correctly_shifts_pure_sine_wave($input_frequency, $target_frequency);
+            }
+        };
+    }
+
+    test_pure_sine!(shift_392_to_440, 392.0, 440.0);
+    test_pure_sine!(shift_440_to_440, 440.0, 440.0);
+    test_pure_sine!(shift_261_to_349, 261.6256, 349.2282);
 }
