@@ -1,0 +1,4 @@
+To Do
+
+- [ ] Smoothing between successive buffers to eliminate artifacts?
+- [ ] Allowing synthesis peaks to extend beyond the buffer range?

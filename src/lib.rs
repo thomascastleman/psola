@@ -195,7 +195,6 @@ where
         out: &mut [S],
     ) {
         assert!(out.len() == self.audio.len());
-        // TODO(tcastleman) Why is half window equal to the pitch period?
         let half_window = self.pitch_period as isize;
 
         for &synth_peak in synthesis_peaks {
@@ -268,5 +267,6 @@ mod test {
         );
     }
 
+    // TODO(tcastleman) Test that works with other sample types
     // TODO(tcastleman) Use pitch detector to automatically assess if output is shifted correctly
 }
