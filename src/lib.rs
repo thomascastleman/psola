@@ -242,6 +242,7 @@ where
 
 #[cfg(test)]
 mod test {
+
     use super::*;
     use dasp::{signal, Signal};
     use pitch_detection::{
@@ -272,80 +273,130 @@ mod test {
         );
     }
 
-    // TODO(tcastleman) Test that works with other sample types
+    #[test]
+    /// Checks that our signal generation and pitch detection mechanisms function correctly.
+    fn pitch_detection_sanity_check() {
+        const FREQUENCY: f64 = 440.0;
+        const BUFFER_SIZE: usize = 1024;
+        const SAMPLE_RATE: usize = 44_100;
+        let signal = signal::rate(SAMPLE_RATE as f64).const_hz(FREQUENCY).sine();
+        let buffer: Vec<f64> = signal.take(BUFFER_SIZE).collect();
+        let detected_pitch = detect_pitch(&buffer, SAMPLE_RATE);
+        roughly_eq(FREQUENCY, detected_pitch.frequency).unwrap();
+    }
 
-    // TODO(tcastleman) Should test across different sample rates / buffer sizes
-    const SAMPLE_RATE: usize = 44100;
-    const BUFFER_SIZE: usize = 1024;
-    const PADDING: usize = BUFFER_SIZE / 2;
-    const POWER_THRESHOLD: f64 = 5.0;
-    const CLARITY_THRESHOLD: f64 = 0.7;
+    // TODO(tcastleman) Test that works with other sample types
 
     // TODO(tcastleman) What should this actually be? Imperceptible difference in pitch? How out of tune does 1 Hz error sound?
     const ALLOWED_ERROR: f64 = 1.0;
 
     /// Detect the pitch of a given input signal.
-    fn detect_pitch(signal: &[f64]) -> Pitch<f64> {
-        YINDetector::new(BUFFER_SIZE, PADDING)
-            .get_pitch(signal, SAMPLE_RATE, POWER_THRESHOLD, CLARITY_THRESHOLD)
+    fn detect_pitch(signal: &[f64], sample_rate: usize) -> Pitch<f64> {
+        const POWER_THRESHOLD: f64 = 5.0;
+        const CLARITY_THRESHOLD: f64 = 0.7;
+        YINDetector::new(signal.len(), signal.len() / 2)
+            .get_pitch(signal, sample_rate, POWER_THRESHOLD, CLARITY_THRESHOLD)
             .unwrap()
+    }
+
+    #[must_use]
+    enum RoughlyEqResult {
+        Equal,
+        NotEqual {
+            expected: f64,
+            actual: f64,
+            diff: f64,
+        },
+    }
+
+    impl RoughlyEqResult {
+        fn unwrap(&self) {
+            if let RoughlyEqResult::NotEqual { .. } = self {
+                panic!("{}", self.display());
+            }
+        }
+
+        fn display(&self) -> String {
+            match self {
+                RoughlyEqResult::Equal => "Equal".into(),
+                RoughlyEqResult::NotEqual {
+                    expected,
+                    actual,
+                    diff,
+                } => {
+                    format!(
+                        "Not Equal\n{:<11} {}\n{:<11} {}\n{:<11} {} (> {})",
+                        "Expected:", expected, "Actual:", actual, "Diff:", diff, ALLOWED_ERROR
+                    )
+                }
+            }
+        }
     }
 
     /// Asserts that two values are within `ALLOWED_ERROR` of each other, printing both values
     /// and their difference upon failure.
-    macro_rules! assert_roughly_eq {
-        ($expected:expr, $actual:expr) => {
-            let expected = $expected;
-            let actual = $actual;
-            let diff = (expected - actual).abs();
-            if (diff >= ALLOWED_ERROR) {
-                panic!(
-                    "Expected ({}) and actual ({}) differ by {} (more than acceptable {})",
-                    expected, actual, diff, ALLOWED_ERROR
-                );
+    fn roughly_eq(expected: f64, actual: f64) -> RoughlyEqResult {
+        let diff = (expected - actual).abs();
+        if diff > ALLOWED_ERROR {
+            RoughlyEqResult::NotEqual {
+                expected,
+                actual,
+                diff,
             }
-        };
+        } else {
+            RoughlyEqResult::Equal
+        }
     }
 
-    fn assert_correctly_shifts_pure_sine_wave(input_frequency: f64, target_frequency: f64) {
+    fn assert_correctly_shifts_pure_sine_wave(
+        input_frequency: f64,
+        target_frequency: f64,
+        buffer_size: usize,
+        sample_rate: usize,
+    ) {
         // Construct a pure sine wave at the input frequency
-        let input: Vec<_> = signal::rate(SAMPLE_RATE as f64)
+        let input: Vec<_> = signal::rate(sample_rate as f64)
             .const_hz(input_frequency)
             .sine()
-            .take(BUFFER_SIZE)
+            .take(buffer_size)
             .collect();
 
         // Shift to the target frequency
-        let psola = Psola::new(&input, SAMPLE_RATE as f32, input_frequency as f32).unwrap();
-        let mut output = [0.0; BUFFER_SIZE];
+        let psola = Psola::new(&input, sample_rate as f32, input_frequency as f32).unwrap();
+        let mut output = vec![0.0; buffer_size];
         psola.shift(target_frequency as f32, &mut output);
 
-        // Assert the detected pitch of the PSOLA output matches the target frequency
-        assert_roughly_eq!(target_frequency, detect_pitch(&output).frequency);
-    }
+        // Compare detected pitch of shifted output with target frequency
+        let eq_result = roughly_eq(
+            target_frequency,
+            detect_pitch(&output, sample_rate).frequency,
+        );
 
-    #[test]
-    /// Checks that our signal generation and pitch detection mechanisms function correctly.
-    fn pitch_detection_sanity_check() {
-        const FREQUENCY: f64 = 440.0;
-        let signal = signal::rate(SAMPLE_RATE as f64).const_hz(FREQUENCY).sine();
-        let buffer: Vec<f64> = signal.take(BUFFER_SIZE).collect();
-        let detected_pitch = detect_pitch(&buffer);
-        assert_roughly_eq!(FREQUENCY, detected_pitch.frequency);
+        if let RoughlyEqResult::NotEqual { .. } = eq_result {
+            // TODO(tcastleman): Export input/output buffer contents and analysis info
+        }
+
+        // Fail test if not roughly equal
+        eq_result.unwrap();
     }
 
     /// Generates a test case which checks that PSOLA correctly shifts a pure sine wave of a
     /// chosen frequency to a given target frequency.
     macro_rules! test_pure_sine {
-        ($test_fn_name:ident, $input_frequency:expr, $target_frequency:expr) => {
+        ($test_fn_name:ident, $input_frequency:expr, $target_frequency:expr, $buffer_size:expr, $sample_rate:expr) => {
             #[test]
             fn $test_fn_name() {
-                assert_correctly_shifts_pure_sine_wave($input_frequency, $target_frequency);
+                assert_correctly_shifts_pure_sine_wave(
+                    $input_frequency,
+                    $target_frequency,
+                    $buffer_size,
+                    $sample_rate,
+                );
             }
         };
     }
 
-    test_pure_sine!(shift_392_to_440, 392.0, 440.0);
-    test_pure_sine!(shift_440_to_440, 440.0, 440.0);
-    test_pure_sine!(shift_261_to_349, 261.6256, 349.2282);
+    test_pure_sine!(shift_392_to_440, 392.0, 440.0, 1024, 44_100);
+    test_pure_sine!(shift_440_to_440, 440.0, 440.0, 1024, 44_100);
+    test_pure_sine!(shift_261_to_349, 261.6256, 349.2282, 1024, 44_100);
 }

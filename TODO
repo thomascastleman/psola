@@ -2,3 +2,6 @@ To Do
 
 - [ ] Smoothing between successive buffers to eliminate artifacts?
 - [ ] Allowing synthesis peaks to extend beyond the buffer range?
+- [ ] Test infrastructure
+  - [ ] Dump input buffer, output buffer, and PSOLA analysis on failure
+  - [ ] Visualization tool: Show both waveforms, peaks
