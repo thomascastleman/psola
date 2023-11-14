@@ -287,8 +287,11 @@ mod test {
 
     // TODO(tcastleman) Test that works with other sample types
 
-    // TODO(tcastleman) What should this actually be? Imperceptible difference in pitch? How out of tune does 1 Hz error sound?
-    const ALLOWED_ERROR: f64 = 1.0;
+    // TODO(tcastleman) Still tuning this error value.
+    /// The allowable error (Hz) between the actual and expected output frequency in a pure
+    /// sign shifting test. This accounts for both imprecision in pitch detection as well
+    /// as near-imperceptible differences in pitch.
+    const ALLOWED_ERROR_HZ: f64 = 3.0;
 
     /// Detect the pitch of a given input signal.
     fn detect_pitch(signal: &[f64], sample_rate: usize) -> Pitch<f64> {
@@ -326,18 +329,18 @@ mod test {
                 } => {
                     format!(
                         "Not Equal\n{:<11} {}\n{:<11} {}\n{:<11} {} (> {})",
-                        "Expected:", expected, "Actual:", actual, "Diff:", diff, ALLOWED_ERROR
+                        "Expected:", expected, "Actual:", actual, "Diff:", diff, ALLOWED_ERROR_HZ
                     )
                 }
             }
         }
     }
 
-    /// Asserts that two values are within `ALLOWED_ERROR` of each other, printing both values
+    /// Asserts that two values are within `ALLOWED_ERROR_HZ` of each other, printing both values
     /// and their difference upon failure.
     fn roughly_eq(expected: f64, actual: f64) -> RoughlyEqResult {
         let diff = (expected - actual).abs();
-        if diff > ALLOWED_ERROR {
+        if diff > ALLOWED_ERROR_HZ {
             RoughlyEqResult::NotEqual {
                 expected,
                 actual,
@@ -396,7 +399,13 @@ mod test {
         };
     }
 
-    test_pure_sine!(shift_392_to_440, 392.0, 440.0, 1024, 44_100);
-    test_pure_sine!(shift_440_to_440, 440.0, 440.0, 1024, 44_100);
-    test_pure_sine!(shift_261_to_349, 261.6256, 349.2282, 1024, 44_100);
+    /// Module for automatically generated test cases. To re-generate, run
+    /// ```no_run
+    /// ./scripts/generate_tests.py >./generated/test_cases.rs
+    /// ```
+    mod generated {
+        use super::*;
+
+        include!("../generated/test_cases.rs");
+    }
 }
