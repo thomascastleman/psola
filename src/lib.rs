@@ -351,7 +351,23 @@ mod test {
         }
     }
 
+    use serde::{Deserialize, Serialize};
+    use std::path::Path;
+    use std::{fs::File, io::Write};
+
+    #[derive(Serialize, Deserialize)]
+    struct TestFailureData {
+        input: Vec<f64>,
+        output: Vec<f64>,
+        analysis_peaks: Vec<usize>,
+        synthesis_peaks: Vec<usize>,
+        expected: f64,
+        actual: f64,
+        diff: f64,
+    }
+
     fn assert_correctly_shifts_pure_sine_wave(
+        test_name: &str,
         input_frequency: f64,
         target_frequency: f64,
         buffer_size: usize,
@@ -375,8 +391,32 @@ mod test {
             detect_pitch(&output, sample_rate).frequency,
         );
 
-        if let RoughlyEqResult::NotEqual { .. } = eq_result {
-            // TODO(tcastleman): Export input/output buffer contents and analysis info
+        if let RoughlyEqResult::NotEqual {
+            expected,
+            actual,
+            diff,
+        } = eq_result
+        {
+            let synthesis_peaks = psola.calculate_synthesis_peaks(target_frequency as f32);
+            let analysis_peaks = psola.analysis_peaks;
+
+            let failure_data = TestFailureData {
+                input,
+                output,
+                analysis_peaks,
+                synthesis_peaks,
+                expected,
+                actual,
+                diff,
+            };
+
+            let serialized = serde_json::to_string(&failure_data).unwrap();
+            let failures_directory =
+                Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/generated/failures"));
+            let output_path = failures_directory.join(test_name);
+
+            let mut output_file = File::create(output_path).unwrap();
+            output_file.write_all(serialized.as_bytes()).unwrap();
         }
 
         // Fail test if not roughly equal
@@ -390,6 +430,7 @@ mod test {
             #[test]
             fn $test_fn_name() {
                 assert_correctly_shifts_pure_sine_wave(
+                    stringify!($test_fn_name),
                     $input_frequency,
                     $target_frequency,
                     $buffer_size,
