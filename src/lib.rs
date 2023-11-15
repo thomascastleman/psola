@@ -361,9 +361,12 @@ mod test {
         output: Vec<f64>,
         analysis_peaks: Vec<usize>,
         synthesis_peaks: Vec<usize>,
-        expected: f64,
-        actual: f64,
+        input_frequency: f64,
+        target_frequency: f64,
+        detected_output_frequency: f64,
         diff: f64,
+        buffer_size: usize,
+        sample_rate: usize,
     }
 
     fn assert_correctly_shifts_pure_sine_wave(
@@ -391,12 +394,7 @@ mod test {
             detect_pitch(&output, sample_rate).frequency,
         );
 
-        if let RoughlyEqResult::NotEqual {
-            expected,
-            actual,
-            diff,
-        } = eq_result
-        {
+        if let RoughlyEqResult::NotEqual { actual, diff, .. } = eq_result {
             let synthesis_peaks = psola.calculate_synthesis_peaks(target_frequency as f32);
             let analysis_peaks = psola.analysis_peaks;
 
@@ -405,9 +403,12 @@ mod test {
                 output,
                 analysis_peaks,
                 synthesis_peaks,
-                expected,
-                actual,
+                input_frequency,
+                target_frequency,
+                detected_output_frequency: actual,
                 diff,
+                buffer_size,
+                sample_rate,
             };
 
             let serialized = serde_json::to_string(&failure_data).unwrap();
