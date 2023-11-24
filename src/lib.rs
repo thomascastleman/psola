@@ -374,35 +374,8 @@ mod test {
 
     static FAILURES_DIRECTORY: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/generated/failures");
 
-    fn export_test_failure_information(
-        psola: Psola<'_, f64>,
-        test_name: &str,
-        input: Vec<f64>,
-        output: Vec<f64>,
-        input_frequency: f64,
-        target_frequency: f64,
-        detected_output_frequency: Option<f64>,
-        diff: Option<f64>,
-        buffer_size: usize,
-        sample_rate: usize,
-    ) {
-        let synthesis_peaks = psola.calculate_synthesis_peaks(target_frequency as f32);
-        let analysis_peaks = psola.analysis_peaks;
-
-        let failure_data = TestFailureData {
-            input,
-            output,
-            analysis_peaks,
-            synthesis_peaks,
-            input_frequency,
-            target_frequency,
-            detected_output_frequency,
-            diff,
-            buffer_size,
-            sample_rate,
-        };
-
-        let serialized = serde_json::to_string(&failure_data).unwrap();
+    fn export_test_failure_information(test_failure_data: &TestFailureData, test_name: &str) {
+        let serialized = serde_json::to_string(test_failure_data).unwrap();
         let failures_directory = Path::new(FAILURES_DIRECTORY);
         let output_path = failures_directory.join(test_name);
 
@@ -432,6 +405,9 @@ mod test {
         let detected_output_frequency =
             detect_pitch(&output, sample_rate).map(|pitch| pitch.frequency);
 
+        let synthesis_peaks = psola.calculate_synthesis_peaks(target_frequency as f32);
+        let analysis_peaks = psola.analysis_peaks;
+
         match detected_output_frequency {
             Some(detected_output_frequency) => {
                 // Compare detected pitch of shifted output with target frequency
@@ -439,16 +415,19 @@ mod test {
 
                 if let RoughlyEqResult::NotEqual { diff, .. } = eq_result {
                     export_test_failure_information(
-                        psola,
+                        &TestFailureData {
+                            analysis_peaks,
+                            synthesis_peaks,
+                            input: input.clone(),
+                            output,
+                            input_frequency,
+                            target_frequency,
+                            detected_output_frequency: Some(detected_output_frequency),
+                            diff: Some(diff),
+                            buffer_size,
+                            sample_rate,
+                        },
                         test_name,
-                        input.clone(),
-                        output,
-                        input_frequency,
-                        target_frequency,
-                        Some(detected_output_frequency),
-                        Some(diff),
-                        buffer_size,
-                        sample_rate,
                     );
                 }
 
@@ -457,16 +436,19 @@ mod test {
             }
             None => {
                 export_test_failure_information(
-                    psola,
+                    &TestFailureData {
+                        analysis_peaks,
+                        synthesis_peaks,
+                        input: input.clone(),
+                        output,
+                        input_frequency,
+                        target_frequency,
+                        detected_output_frequency: None,
+                        diff: None,
+                        buffer_size,
+                        sample_rate,
+                    },
                     test_name,
-                    input.clone(),
-                    output,
-                    input_frequency,
-                    target_frequency,
-                    None,
-                    None,
-                    buffer_size,
-                    sample_rate,
                 );
 
                 panic!("No pitch detected in PSOLA output");
