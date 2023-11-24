@@ -281,7 +281,7 @@ mod test {
         const SAMPLE_RATE: usize = 44_100;
         let signal = signal::rate(SAMPLE_RATE as f64).const_hz(FREQUENCY).sine();
         let buffer: Vec<f64> = signal.take(BUFFER_SIZE).collect();
-        let detected_pitch = detect_pitch(&buffer, SAMPLE_RATE);
+        let detected_pitch = detect_pitch(&buffer, SAMPLE_RATE).unwrap();
         roughly_eq(FREQUENCY, detected_pitch.frequency).unwrap();
     }
 
@@ -294,12 +294,15 @@ mod test {
     const ALLOWED_ERROR_HZ: f64 = 3.0;
 
     /// Detect the pitch of a given input signal.
-    fn detect_pitch(signal: &[f64], sample_rate: usize) -> Pitch<f64> {
+    fn detect_pitch(signal: &[f64], sample_rate: usize) -> Option<Pitch<f64>> {
         const POWER_THRESHOLD: f64 = 5.0;
         const CLARITY_THRESHOLD: f64 = 0.7;
-        YINDetector::new(signal.len(), signal.len() / 2)
-            .get_pitch(signal, sample_rate, POWER_THRESHOLD, CLARITY_THRESHOLD)
-            .unwrap()
+        YINDetector::new(signal.len(), signal.len() / 2).get_pitch(
+            signal,
+            sample_rate,
+            POWER_THRESHOLD,
+            CLARITY_THRESHOLD,
+        )
     }
 
     #[must_use]
@@ -363,10 +366,48 @@ mod test {
         synthesis_peaks: Vec<usize>,
         input_frequency: f64,
         target_frequency: f64,
-        detected_output_frequency: f64,
-        diff: f64,
+        detected_output_frequency: Option<f64>,
+        diff: Option<f64>,
         buffer_size: usize,
         sample_rate: usize,
+    }
+
+    static FAILURES_DIRECTORY: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/generated/failures");
+
+    fn export_test_failure_information(
+        psola: Psola<'_, f64>,
+        test_name: &str,
+        input: Vec<f64>,
+        output: Vec<f64>,
+        input_frequency: f64,
+        target_frequency: f64,
+        detected_output_frequency: Option<f64>,
+        diff: Option<f64>,
+        buffer_size: usize,
+        sample_rate: usize,
+    ) {
+        let synthesis_peaks = psola.calculate_synthesis_peaks(target_frequency as f32);
+        let analysis_peaks = psola.analysis_peaks;
+
+        let failure_data = TestFailureData {
+            input,
+            output,
+            analysis_peaks,
+            synthesis_peaks,
+            input_frequency,
+            target_frequency,
+            detected_output_frequency,
+            diff,
+            buffer_size,
+            sample_rate,
+        };
+
+        let serialized = serde_json::to_string(&failure_data).unwrap();
+        let failures_directory = Path::new(FAILURES_DIRECTORY);
+        let output_path = failures_directory.join(test_name);
+
+        let mut output_file = File::create(output_path).unwrap();
+        output_file.write_all(serialized.as_bytes()).unwrap();
     }
 
     fn assert_correctly_shifts_pure_sine_wave(
@@ -388,40 +429,60 @@ mod test {
         let mut output = vec![0.0; buffer_size];
         psola.shift(target_frequency as f32, &mut output);
 
-        // Compare detected pitch of shifted output with target frequency
-        let eq_result = roughly_eq(
-            target_frequency,
-            detect_pitch(&output, sample_rate).frequency,
-        );
+        let detected_output_frequency =
+            detect_pitch(&output, sample_rate).map(|pitch| pitch.frequency);
 
-        if let RoughlyEqResult::NotEqual { actual, diff, .. } = eq_result {
-            let synthesis_peaks = psola.calculate_synthesis_peaks(target_frequency as f32);
-            let analysis_peaks = psola.analysis_peaks;
+        match detected_output_frequency {
+            Some(detected_output_frequency) => {
+                // Compare detected pitch of shifted output with target frequency
+                let eq_result = roughly_eq(target_frequency, detected_output_frequency);
 
-            let failure_data = TestFailureData {
-                input,
-                output,
-                analysis_peaks,
-                synthesis_peaks,
-                input_frequency,
-                target_frequency,
-                detected_output_frequency: actual,
-                diff,
-                buffer_size,
-                sample_rate,
-            };
+                if let RoughlyEqResult::NotEqual { diff, .. } = eq_result {
+                    export_test_failure_information(
+                        psola,
+                        test_name,
+                        input.clone(),
+                        output,
+                        input_frequency,
+                        target_frequency,
+                        Some(detected_output_frequency),
+                        Some(diff),
+                        buffer_size,
+                        sample_rate,
+                    );
+                }
 
-            let serialized = serde_json::to_string(&failure_data).unwrap();
-            let failures_directory =
-                Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/generated/failures"));
-            let output_path = failures_directory.join(test_name);
+                // Fail test if not roughly equal
+                eq_result.unwrap();
+            }
+            None => {
+                export_test_failure_information(
+                    psola,
+                    test_name,
+                    input.clone(),
+                    output,
+                    input_frequency,
+                    target_frequency,
+                    None,
+                    None,
+                    buffer_size,
+                    sample_rate,
+                );
 
-            let mut output_file = File::create(output_path).unwrap();
-            output_file.write_all(serialized.as_bytes()).unwrap();
+                panic!("No pitch detected in PSOLA output");
+            }
+        };
+    }
+
+    use std::fs;
+    use std::sync::Once;
+    static ONCE: Once = Once::new();
+
+    fn clear_failures_directory() -> Result<()> {
+        for entry in fs::read_dir(Path::new(FAILURES_DIRECTORY))? {
+            fs::remove_file(entry?.path())?;
         }
-
-        // Fail test if not roughly equal
-        eq_result.unwrap();
+        Ok(())
     }
 
     /// Generates a test case which checks that PSOLA correctly shifts a pure sine wave of a
@@ -430,6 +491,9 @@ mod test {
         ($test_fn_name:ident, $input_frequency:expr, $target_frequency:expr, $buffer_size:expr, $sample_rate:expr) => {
             #[test]
             fn $test_fn_name() {
+                // Ensure that the failures directory is cleared of previous test output before generating any more
+                ONCE.call_once(|| clear_failures_directory().unwrap());
+
                 assert_correctly_shifts_pure_sine_wave(
                     stringify!($test_fn_name),
                     $input_frequency,

@@ -4,6 +4,7 @@ To Do
 - [ ] Allowing synthesis peaks to extend beyond the buffer range?
 - [ ] Correct for loss of amplitude
 - [ ] Test infrastructure
+  - [x] Clear test failure files before running
   - [x] Dump input buffer, output buffer, and PSOLA analysis on failure
   - [x] Visualization tool: Show both waveforms, peaks. Show ideal output?
   - [ ] Actual vocal samples

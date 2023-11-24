@@ -1,7 +1,7 @@
 #!/bin/env python3
 
 from dataclasses import dataclass
-from typing import List
+from typing import List, Union
 from pathlib import Path
 import argparse
 import json
@@ -16,8 +16,8 @@ class TestFailureData:
     synthesis_peaks: List[int]
     input_frequency: float
     target_frequency: float
-    detected_output_frequency: float
-    diff: float
+    detected_output_frequency: Union[float, None]
+    diff: Union[float, None]
     buffer_size: int
     sample_rate: int
 
@@ -41,6 +41,10 @@ INPUT_COLOR = "#63e0ff"
 OUTPUT_COLOR = "#a463ff"
 
 
+def none_to_na(value) -> str:
+    return "N/A" if value is None else value
+
+
 def visualize(data: TestFailureData):
     sample_numbers = [i for i in range(len(data.input_signal))]
 
@@ -54,7 +58,7 @@ def visualize(data: TestFailureData):
         sample_numbers,
         data.output_signal,
         color=OUTPUT_COLOR,
-        label=f"Output ({data.detected_output_frequency} Hz)",
+        label=f"Output ({none_to_na(data.detected_output_frequency)} Hz)",
     )
 
     plt.plot(
