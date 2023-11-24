@@ -362,6 +362,7 @@ mod test {
     struct TestFailureData {
         input: Vec<f64>,
         output: Vec<f64>,
+        ideal_output: Vec<f64>,
         analysis_peaks: Vec<usize>,
         synthesis_peaks: Vec<usize>,
         input_frequency: f64,
@@ -397,6 +398,12 @@ mod test {
             .take(buffer_size)
             .collect();
 
+        let ideal_output: Vec<_> = signal::rate(sample_rate as f64)
+            .const_hz(target_frequency)
+            .sine()
+            .take(buffer_size)
+            .collect();
+
         // Shift to the target frequency
         let psola = Psola::new(&input, sample_rate as f32, input_frequency as f32).unwrap();
         let mut output = vec![0.0; buffer_size];
@@ -420,6 +427,7 @@ mod test {
                             synthesis_peaks,
                             input: input.clone(),
                             output,
+                            ideal_output,
                             input_frequency,
                             target_frequency,
                             detected_output_frequency: Some(detected_output_frequency),
@@ -442,6 +450,7 @@ mod test {
                         input: input.clone(),
                         output,
                         input_frequency,
+                        ideal_output,
                         target_frequency,
                         detected_output_frequency: None,
                         diff: None,
